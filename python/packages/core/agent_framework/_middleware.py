@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import inspect
 import logging
@@ -1565,8 +1566,8 @@ class FunctionMiddlewarePipeline(BaseMiddlewarePipeline):
 
                     security_materialization = _SECURITY_ARGUMENT_MATERIALIZATION_CONTEXT.get()
                     if security_materialization is not None:
-                        active_context, materialize = security_materialization
-                        if context is active_context:
+                        active_context, materialize, origin_task = security_materialization
+                        if context is active_context and asyncio.current_task() is origin_task:
                             materialize(context)
                     context.result = final_handler(context)
                     if inspect.isawaitable(context.result):
