@@ -1025,14 +1025,14 @@ class FunctionTool(SerializationMixin):
         # alive across schema validation: validation drops the undeclared key,
         # which would otherwise erase the signal that the call is still the
         # wrapped malformed payload rather than a middleware repair.
-        preserved_raw = None
+        preserved_wrapper: dict[str, Any] = {}
         malformed_wrapper = context.metadata.get(_MALFORMED_WRAPPER_CONTEXT_KEY)
         if malformed_wrapper is not None and isinstance(current_arguments, Mapping) and "raw" in current_arguments:
-            preserved_raw = current_arguments["raw"]
+            preserved_wrapper["raw"] = current_arguments["raw"]
 
         validated_arguments = self._prepare_arguments(arguments)
-        if preserved_raw is not None:
-            validated_arguments = {**validated_arguments, "raw": preserved_raw}
+        if preserved_wrapper:
+            validated_arguments = {**validated_arguments, **preserved_wrapper}
         context.arguments = validated_arguments
         context.metadata[_PREPARED_ARGUMENTS_CONTEXT_KEY] = _PreparedArgumentsState(
             arguments=validated_arguments,

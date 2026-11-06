@@ -2578,7 +2578,8 @@ async def test_middleware_that_replaces_null_wrapper_with_valid_arguments_repair
     assert result_groups[0][0].result == "ok"
 
 
-async def test_builtin_label_tracking_middleware_preserves_malformed_wrapper_provenance() -> None:
+@pytest.mark.parametrize("arguments", ["not {json", "[1, 2]", "null", "NaN", "false", "0", '""', "   "])
+async def test_builtin_label_tracking_middleware_preserves_malformed_wrapper_provenance(arguments: str) -> None:
     """The built-in label-tracking middleware must not erase the wrapper.
 
     Its argument normalization validates against the declared model and drops
@@ -2597,7 +2598,7 @@ async def test_builtin_label_tracking_middleware_preserves_malformed_wrapper_pro
     result_groups, should_terminate = await _try_execute_function_call_groups(
         custom_args={},
         function_calls=[
-            Content.from_function_call(call_id="call-1", name="typed_label_target", arguments="not {json"),
+            Content.from_function_call(call_id="call-1", name="typed_label_target", arguments=arguments),
         ],
         tools=[typed_label_target],
         config={},

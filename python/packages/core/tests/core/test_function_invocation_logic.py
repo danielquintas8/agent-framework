@@ -971,6 +971,77 @@ def _force_tool_content_tool_choice_none_stream(
     chat_client_base._get_streaming_response = _get_streaming_response
 
 
+@pytest.mark.parametrize("streaming", [False, True], ids=["non-streaming", "streaming"])
+@pytest.mark.parametrize("requires_approval", [False, True], ids=["immediate", "approved"])
+async def test_null_arguments_with_label_tracking_never_execute_the_tool(
+    chat_client_base: SupportsChatGetResponse, streaming: bool, requires_approval: bool
+) -> None:
+    """A null wrapper survives normalization and approval resume without executing the tool."""
+    from agent_framework.security import LabelTrackingFunctionMiddleware
+
+    calls: list[int] = []
+
+    @tool(name="null_target", approval_mode="always_require" if requires_approval else "never_require")
+    def null_target(limit: int = 0) -> str:
+        calls.append(limit)
+        return "unexpected execution"
+
+    function_call = Content.from_function_call("null-call", "null_target", arguments="null", id="null-occurrence")
+    if streaming:
+        chat_client_base.streaming_responses = [  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
+            [ChatResponseUpdate(role="assistant", contents=[function_call])],
+            [ChatResponseUpdate(role="assistant", contents=[Content.from_text("done")])],
+        ]
+    else:
+        chat_client_base.run_responses = [  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
+            ChatResponse(messages=Message("assistant", [function_call])),
+            ChatResponse(messages=Message("assistant", ["done"])),
+        ]
+
+    agent = Agent(client=chat_client_base, tools=[null_target], middleware=[LabelTrackingFunctionMiddleware()])
+    session = agent.create_session()
+
+    async def run(messages: str | list[Message]) -> list[Message]:
+        if streaming:
+            response_stream = agent.run(messages, session=session, stream=True)
+            updates = [update async for update in response_stream]
+            response = await response_stream.get_final_response()
+            assert [
+                (content.call_id, content.result)
+                for update in updates
+                for content in update.contents
+                if content.type == "function_result"
+            ] == [
+                (content.call_id, content.result)
+                for message in response.messages
+                for content in message.contents
+                if content.type == "function_result"
+            ]
+        else:
+            response = await agent.run(messages, session=session)
+        return response.messages
+
+    messages = await run("go")
+    if requires_approval:
+        requests = [
+            content
+            for message in messages
+            for content in message.contents
+            if content.type == "function_approval_request"
+        ]
+        assert len(requests) == 1
+        assert calls == []
+        session = AgentSession.from_dict(json.loads(json.dumps(session.to_dict())))
+        messages = await run([Message("user", [requests[0].to_function_approval_response(approved=True)])])
+
+    assert calls == []
+    results = [content for message in messages for content in message.contents if content.type == "function_result"]
+    assert len(results) == 1
+    assert results[0].call_id == "null-call"
+    assert results[0].result == "Error: Argument parsing failed."
+    assert results[0].exception is not None
+
+
 async def test_base_client_with_function_calling(chat_client_base: SupportsChatGetResponse):
     exec_counter = 0
 
