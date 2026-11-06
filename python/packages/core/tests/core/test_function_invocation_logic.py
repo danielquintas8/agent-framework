@@ -1042,6 +1042,61 @@ async def test_null_arguments_with_label_tracking_never_execute_the_tool(
     assert results[0].exception is not None
 
 
+@pytest.mark.parametrize("streaming", [False, True], ids=["non-streaming", "streaming"])
+@pytest.mark.parametrize("object_payload", [False, True], ids=["scalar", "object"])
+async def test_declared_raw_rewritten_by_middleware_reaches_the_tool_with_its_declared_type(
+    chat_client_base: SupportsChatGetResponse, streaming: bool, object_payload: bool
+) -> None:
+    """Both payload forms retain ordinary type preparation after middleware rewrites a value."""
+    observed_values: list[datetime] = []
+
+    class RewriteRaw(FunctionMiddleware):
+        async def process(self, context: FunctionInvocationContext, call_next: Callable[[], Awaitable[None]]) -> None:
+            context.arguments = {"raw": "2025-02-03T00:00:00+00:00"}
+            await call_next()
+
+    @tool(name="raw_target", approval_mode="never_require")
+    def raw_target(raw: datetime) -> str:
+        observed_values.append(raw)
+        return raw.isoformat()
+
+    arguments = '{"raw":"2024-01-01T00:00:00+00:00"}' if object_payload else '"2024-01-01T00:00:00+00:00"'
+    function_call = Content.from_function_call("raw-call", "raw_target", arguments=arguments)
+    if streaming:
+        chat_client_base.streaming_responses = [  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
+            [ChatResponseUpdate(role="assistant", contents=[function_call])],
+            [ChatResponseUpdate(role="assistant", contents=[Content.from_text("done")])],
+        ]
+    else:
+        chat_client_base.run_responses = [  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
+            ChatResponse(messages=Message("assistant", [function_call])),
+            ChatResponse(messages=Message("assistant", ["done"])),
+        ]
+    agent = Agent(client=chat_client_base, tools=[raw_target], middleware=[RewriteRaw()])
+    if streaming:
+        response_stream = agent.run("go", stream=True)
+        updates = [update async for update in response_stream]
+        response = await response_stream.get_final_response()
+        assert [
+            content.result for update in updates for content in update.contents if content.type == "function_result"
+        ] == [
+            content.result
+            for message in response.messages
+            for content in message.contents
+            if content.type == "function_result"
+        ]
+    else:
+        response = await agent.run("go")
+
+    assert observed_values == [datetime(2025, 2, 3, tzinfo=timezone.utc)]
+    results = [
+        content for message in response.messages for content in message.contents if content.type == "function_result"
+    ]
+    assert len(results) == 1
+    assert results[0].exception is None
+    assert results[0].result == "2025-02-03T00:00:00+00:00"
+
+
 async def test_base_client_with_function_calling(chat_client_base: SupportsChatGetResponse):
     exec_counter = 0
 

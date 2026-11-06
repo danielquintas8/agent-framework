@@ -2422,7 +2422,7 @@ async def _auto_invoke_function(
     if host_payload_budget is not None:
         middleware_context.metadata[_FUNCTION_RESULT_PAYLOAD_BUDGET_CONTEXT_KEY] = host_payload_budget
     middleware_context.metadata[_AUTO_ARGUMENT_PREPARATION_CONTEXT_KEY] = True
-    if wrapped_raw_present:
+    if wrapped_raw_present and not _tool_declares_parameter(tool, "raw"):
         middleware_context.metadata[_MALFORMED_WRAPPER_CONTEXT_KEY] = dict(parsed_args)
     if arguments_prepared:
         middleware_context.metadata[_PREPARED_ARGUMENTS_CONTEXT_KEY] = _PreparedArgumentsState(
